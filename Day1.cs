@@ -1,7 +1,3 @@
-using System;
-using System.Linq;
-using System.Threading.Tasks;
-
 var lines = File.ReadLinesAsync("Day1.txt");  
 var count = 0;
 var listOne = new List<int>();
