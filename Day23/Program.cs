@@ -1,4 +1,5 @@
 ﻿
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Day23;
 
@@ -25,10 +26,10 @@ await foreach (var line in lines)
     }
 }
 
-var startingComputers = computers.Values.Select(CreateList).ToList();
-var distanceOneComputers = GetPathsFrom(startingComputers, true).Select(ConvertToList).ToList();
-var distanceTwoComputers = GetPathsFrom(distanceOneComputers, true).Select(ConvertToList).ToList();
-var distanceThreeComputers = GetPathsFrom(distanceTwoComputers, true).Select(ConvertToList).ToList();
+var startingComputers = computers.Values.Select(c => c.ToList()).ToList();
+var distanceOneComputers = GetPathsFrom(startingComputers, true);
+var distanceTwoComputers = GetPathsFrom(distanceOneComputers, true);
+var distanceThreeComputers = GetPathsFrom(distanceTwoComputers, true);
 
 var sets = distanceThreeComputers.Where(p => p.Last() == p.First()).Select(p => p.Distinct())
     .Where(p => p.Any(c => c.Identifier.StartsWith('t'))).ToList();
@@ -42,79 +43,80 @@ foreach (var set in distinctSets)
 
 Console.WriteLine($"Found {distinctSets.Count} possibilities");
 
-var largestSet = computers.Values.Select(RecursePathsFrom).Select(ConvertToList).MaxBy(p => p.Count);
-Console.WriteLine($"Largest set is of {largestSet.Count} computers: {string.Join(',', largestSet)}. Password is {string.Join(',', largestSet.OrderBy(c => c.Identifier))}");
+var largestSet = computers.Values.AsParallel().Select(BuildNodeSet).MaxBy(p => p.Count);
+if (largestSet is null)
+    throw new InvalidOperationException("Largest set is null");
+Console.WriteLine($"Largest set is of {largestSet.Count} computers. Password is {string.Join(',', largestSet.OrderBy(c => c.Identifier))}");
 
+return;
 
-List<Computer> ConvertToList(IEnumerable<Computer> e) => [.. e];
-List<Computer> CreateList(Computer c) => [c];
-IEnumerable<IEnumerable<Computer>> GetPathsFrom(List<List<Computer>> input, bool allowDuplicates)
+List<List<Computer>> GetPathsFrom(List<List<Computer>> input, bool allowDuplicates)
 {
-    foreach (var path in input)
+    ConcurrentBag<List<Computer>> result = [];
+    
+    Parallel.ForEach(input, path =>
     {
         var lastComputer = path.Last();
-        foreach (var link in links.Where(l => l.A == lastComputer || l.B == lastComputer))
+        Parallel.ForEach(links.Where(l => l.A == lastComputer || l.B == lastComputer), link =>
         {
             var nextComputer = link.GetOtherEndOfLinkFrom(lastComputer);
             if (nextComputer == null)
-                continue;
+                return;
             if (!allowDuplicates && path.Contains(nextComputer))
-                yield return path;
-            yield return path.Append(nextComputer);
-        }
-    }
+                result.Add(path);
+            result.Add(path.Append(nextComputer).ToList());
+        });
+    });
+
+    return result.ToList();
 }
 
-IEnumerable<Computer> RecursePathsFrom(Computer c)
-{
-    var paths = new List<HashSet<Computer>>();
-    long lastSum = 0;
-    paths.Add([c]);
-    long newSum = 1;
-
-    while (newSum != lastSum)
-    {
-        lastSum = newSum;
-        paths = GetPathsFrom(paths.Select(s => s.ToList()).ToList(), false).Select(p => new HashSet<Computer>(p))
-            .Where(p => p.SelectMany(x => p, (x, y) => Tuple.Create(x, y))
-                .Where(tuple => tuple.Item1 != tuple.Item2).All(tuple =>
-            {
-                return LinkExists(tuple.Item1, tuple.Item2);
-            }))
-            .Distinct(new NodeSetComparer()).ToList();
-        var maxCount = paths.Max(p => p.Count);
-        paths = paths.Where(p => p.Count == maxCount).ToList();
-        newSum = paths.Sum(p => p.Count);
-    }
-
-    return paths[0];
-}
-
-bool LinkExists(Computer a, Computer b) => links.Any(l => l.A == a && l.B == b || l.A == b && l.B == a);
-
-HashSet<Computer> BuildNodeSet(Computer c)
+HashSet<Computer> BuildNodeSet(Computer computer)
 {
     var visitedComputers = new HashSet<Computer>();
-    var set = new HashSet<Computer>();
-
+    
     var q = new Queue<Computer>();
-    q.Enqueue(c);
+    q.Enqueue(computer);
     while (q.Count > 0)
     {
         var current = q.Dequeue();
 
         visitedComputers.Add(current);
 
-        if (set.All(d => links.Any(l => l.A == current && l.B == d || l.A == d && l.B == current)))
-            set.Add(current);
-
         foreach (var link in links)
         {
             var connectedComputer = link.GetOtherEndOfLinkFrom(current);
-            if (connectedComputer != null && !visitedComputers.Contains(connectedComputer))
+            if (connectedComputer == null || visitedComputers.Contains(connectedComputer) || q.Contains(connectedComputer))
+                continue;
+
+            var newSet = new HashSet<Computer>(visitedComputers) { connectedComputer };
+            if (IsSetConnected(newSet))
                 q.Enqueue(connectedComputer);
         }
     }
 
+    var set = new HashSet<Computer>();
+    foreach (var c in visitedComputers)
+    {
+        set.Add(c);
+        if (!IsSetConnected(set))
+            set.Remove(c);
+    }
+
     return set;
+
+    bool LinkExists(Computer a, Computer b) => links.Any(l => l.LinkIsBetween(a, b));
+
+    bool IsSetConnected(HashSet<Computer> testSet)
+    {
+        var result = true;
+        foreach (var c in testSet)
+        {
+            result &= testSet.All(d => d == c || LinkExists(c, d));
+            if (!result)
+                return false;
+        }
+
+        return result;
+    }
 }

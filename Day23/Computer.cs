@@ -9,6 +9,8 @@ public record Computer(string Identifier) : IComparable<Computer>
             : string.Compare(Identifier, other.Identifier, StringComparison.Ordinal);
     }
 
+    public List<Computer> ToList() => [this];
+
     public override string ToString() => Identifier;
 }
 
