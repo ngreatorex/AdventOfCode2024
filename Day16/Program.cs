@@ -2,10 +2,10 @@
 using Serilog;
 
 var logger = new LoggerConfiguration()
-    .MinimumLevel.Information()
+    .MinimumLevel.Debug()
     .WriteTo.Console()
     .CreateLogger();
 
-var fileName = "Sample1.txt";
+var fileName = "Input.txt";
 var maze = await Maze.OpenMaze(logger, fileName);
 maze.Solve();

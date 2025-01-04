@@ -1,80 +1,98 @@
-﻿namespace Day16;
+﻿using Serilog;
+
+namespace Day16;
 
 
-    public record Graph(List<Node> Nodes, Node Start, Node End)
+public record Graph(ILogger Logger, List<Node> Nodes, Node Start, Node End)
+{
+    public IEnumerable<(IEnumerable<Cell> Cells, IEnumerable<Move> Moves, int Cost)> GetShortestPaths()
     {
-        public LinkedList<(Node Node, Edge? Edge)> GetShortestPath()
+        Dijkstra();
+
+        var shortestPaths = BuildShortestPathFrom(new LinkedList<(Node Node, Edge? Edge)>(), End).ToList();
+
+        foreach (var shortestPath in shortestPaths)
         {
-            Dijkstra();
-
-            LinkedList<(Node Node, Edge? Edge)> shortestPath = new();
-            shortestPath.AddFirst((End, null));
-
-            BuildShortestPath(shortestPath, End);
-
             while (shortestPath.Last?.Previous != null && shortestPath.Last.Previous.Value.Node.Cell == shortestPath.Last.Value.Node.Cell)
                 shortestPath.RemoveLast();
             if (shortestPath.Last != null)
                 shortestPath.Last.Value = new(shortestPath.Last.Value.Node, null);
-
-            return shortestPath;
         }
-        
-        private void Dijkstra()
-        {
-            Start.MinCostToStart = 0;
-            List<Node> prioQueue = [Start];
-            var startToEndCost = double.MaxValue;
 
-            do
+        var pathsWithScores = shortestPaths.Select(path => (Path: path, Moves: path.Where(p => p.Edge != null).SelectMany(p => p.Edge!.Moves))).Select(path => (Cells: path.Path.Select(t => t.Node.Cell).Distinct(), path.Moves, Cost: path.Moves.Sum(m => MazeInfo.costs[m])));
+        var minScore = pathsWithScores.Min(t => t.Cost);
+        var minPaths = pathsWithScores.Where(t => t.Cost == minScore);
+
+        return minPaths;
+    }
+
+    private static IEnumerable<LinkedList<(Node Node, Edge? Edge)>> BuildShortestPathFrom(LinkedList<(Node Node, Edge? Edge)> path, Node current)
+    {
+        if (current.CameFrom.Count == 0)
+        {
+            yield return path;
+            yield break;
+        }
+
+        foreach (var prevNode in current.CameFrom)
+        {
+            var newPath = new LinkedList<(Node Node, Edge? Edge)>(path);
+            var edge = prevNode.Edges.Single(x => x.Child == current);
+            newPath.AddFirst((prevNode, edge));
+
+            foreach (var completePath in BuildShortestPathFrom(newPath, prevNode))
             {
-                prioQueue = [.. prioQueue.OrderBy(x => x.MinCostToStart ?? double.MaxValue)];
-
-                var node = prioQueue.First();
-                prioQueue.Remove(node);
-
-                foreach (var cnn in node.Edges.OrderBy(x => x.Weight))
-                {
-                    var childNode = cnn.Child;
-
-                    if (childNode.Visited)
-                        continue;
-
-                    if (childNode.MinCostToStart == null ||
-                        node.MinCostToStart + cnn.Weight < childNode.MinCostToStart && node.MinCostToStart + cnn.Weight < startToEndCost)
-                    {
-                        childNode.MinCostToStart = node.MinCostToStart + cnn.Weight;
-                        childNode.NearestToStart = node;
-                        if (!prioQueue.Contains(childNode))
-                            prioQueue.Add(childNode);
-                    }
-                }
-
-                node.Visited = true;
-
-                if (node == End)
-                    startToEndCost = node.MinCostToStart ?? throw new InvalidOperationException("Cost is null");
-            } 
-            while (prioQueue.Count > 0);
+                yield return completePath;
+            }
         }
+    }
 
-        private static void BuildShortestPath(LinkedList<(Node, Edge?)> list, Node node)
+    private void Dijkstra()
+    {
+        var queue = new PriorityQueue<Node, int>();
+        var visited = new HashSet<Node>();
+        
+        Start.CostToStart = 0;
+
+        queue.Enqueue(Start, 0);
+
+        while (queue.Count > 0)
         {
-            if (node.NearestToStart == null)
+            var current = queue.Dequeue();
+            var currentCost = current.CostToStart ?? int.MaxValue;
+
+            if (current == End)
                 return;
 
-            list.AddFirst((node.NearestToStart, node.NearestToStart.Edges.Single(x => x.Child == node)));
-            BuildShortestPath(list, node.NearestToStart);
+            foreach (var edge in current.Edges)
+            {
+                var neighbour = edge.Child;
+
+                if (visited.Contains(neighbour))
+                    continue;
+
+                var alt = currentCost + edge.Weight;
+
+                if (alt <= (neighbour.CostToStart ?? int.MaxValue))
+                {
+                    neighbour.CameFrom.Add(current);
+                    neighbour.CostToStart = alt;
+
+                    queue.Remove(neighbour, out _, out _);
+                    queue.Enqueue(neighbour, alt);
+                }
+            }
+
+            visited.Add(current);
         }
     }
+}
 
-    public record Node(Direction Facing, Cell Cell, List<Edge> Edges)
-    {
-        public double? MinCostToStart { get; set; }
-        public Node? NearestToStart { get; set; }
-        public bool Visited { get; set; }
-        public double StraightLineDistanceToEnd { get; set; }
+public record Node(Direction Facing, Cell Cell, List<Edge> Edges)
+{
+    public int? CostToStart { get; set; }
+    public HashSet<Node> CameFrom { get; set; } = [];
 
-        public override string ToString() => $"{{Node [{Cell.Y}, {Cell.X}] facing {Facing}}}";
-    }
+    public override string ToString() => $"{{Node [{Cell.Y}, {Cell.X}] facing {Facing}}}";
+}
 

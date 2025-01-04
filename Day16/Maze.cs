@@ -65,31 +65,62 @@ public partial class Maze
     public required Cell[,] cells;
     private readonly ILogger logger;
 
-    public List<Move> Solve()
+    public void Solve()
     {
         var graph = TransformMazeToGraph();
-        var path = graph.GetShortestPath();
+        var paths = graph.GetShortestPaths().ToList();
 
-        logger.Information("Shortest path: {Path}", path);
+        foreach (var (_, Moves, Cost) in paths)
+        {
+            var path = Moves.ToList();
 
-        var result = path.Where(p => p.Edge != null).SelectMany(p => p.Edge!.Moves).ToList();
-        logger.Information("Solution: {Path}", result);
-        logger.Information("{MazeWithPath}", MazeWithPath(result));
+            logger.Information("Solution: {Path}", path);
+            logger.Information("{MazeWithPath}", MazeWithPath(path));
+            logger.Information("Cost: {Cost}", Cost);
+        }
 
-        logger.Information("Cost: {Cost}", result.Sum(p => MazeInfo.costs[p]));
-
-        return result;
+        var allVisitedCells = paths.SelectMany(t => t.Cells).Distinct().ToList();
+        logger.Information("Visited cells: {AllVisitedCells}", allVisitedCells);
+        logger.Information("{MazeWithVisitedCells}", MazeWithVisitedCells(allVisitedCells));
+        logger.Information("Found {PathCount} shortest paths that visit {CellCount} cells", paths.Count, allVisitedCells.Count);
     }
 
-    public string MazeWithPath(List<Move> moves)
+    public string MazeWithVisitedCells(List<Cell> visitedCells)
     {
-        var chars = new string[cells.GetLength(0), cells.GetLength(1)];
+        var chars = new char[cells.GetLength(0), cells.GetLength(1)];
 
         for (var i = 0; i < cells.GetLength(0); i++)
         {
             for (var j = 0; j < cells.GetLength(1); j++)
             {
-                chars[i, j] = cells[i, j].ToString();
+                chars[i, j] = visitedCells.Contains(cells[i, j]) ? 'O' : cells[i, j].ToChar();
+            }
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("Maze with visited cells:");
+
+        for (var i = 0; i < chars.GetLength(0); i++)
+        {
+            for (var j = 0; j < chars.GetLength(1); j++)
+            {
+                sb.Append(chars[i, j]);
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    public string MazeWithPath(List<Move> moves)
+    {
+        var chars = new char[cells.GetLength(0), cells.GetLength(1)];
+
+        for (var i = 0; i < cells.GetLength(0); i++)
+        {
+            for (var j = 0; j < cells.GetLength(1); j++)
+            {
+                chars[i, j] = cells[i, j].ToChar();
             }
         }
 
@@ -143,7 +174,7 @@ public partial class Maze
         {
             for (var j = 0; j < cells.GetLength(1); j++)
             {
-                sb.Append(cells[i, j]);
+                sb.Append(cells[i, j].ToChar());
             }
             sb.AppendLine();
         }
@@ -200,7 +231,7 @@ public partial class Maze
         if (startNode == null || endNode == null)
             throw new InvalidOperationException("Either start or end node is null");
 
-        return new Graph(directedNodes.Values.SelectMany(kvp => kvp.Values).ToList(), startNode, endNode);
+        return new Graph(logger, directedNodes.Values.SelectMany(kvp => kvp.Values).ToList(), startNode, endNode);
     }
 
     private (Direction direction, int y, int x)[] GetNeighbours((int y, int x) position)
@@ -213,16 +244,16 @@ public partial class Maze
         bool IsValidPosition(int y, int x) => y >= 0 && y < cells.GetLength(0) && x >= 0 && x < cells.GetLength(1);
     }
 
-    private static string MoveToChar(Move m)
+    private static char MoveToChar(Move m)
     {
         return m switch
         {
-            Move.MoveNorth => "^",
-            Move.MoveEast => ">",
-            Move.MoveSouth => "v",
-            Move.MoveWest => "<",
-            Move.RotateClockwise => "-v",
-            Move.RotateCounterClockwise => "v-",
+            Move.MoveNorth => '^',
+            Move.MoveEast => '>',
+            Move.MoveSouth => 'v',
+            Move.MoveWest => '<',
+            Move.RotateClockwise => '/',
+            Move.RotateCounterClockwise => '\\',
             _ => throw new NotImplementedException(),
         };
     }
